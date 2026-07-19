@@ -1,0 +1,26 @@
+{
+  "name": "ride-agent-skill",
+  "version": "1.2.0",
+  "description": "TADA Ride Skill - OpenClaw Skill + Node scripts",
+  "type": "module",
+  "bin": {
+    "tada": "dist/cli/tada"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "rm -rf dist && BUILD_ENV=dev tsup && mv dist/cli/tada.js dist/cli/tada && chmod +x dist/cli/tada && cp SKILL.md README.md package.json dist/skill/ && cp -r references dist/skill/ && node scripts/bake-readme-repo.mjs dev && node scripts/bake-skill-license.mjs",
+    "build:dev": "rm -rf dist && BUILD_ENV=dev tsup && mv dist/cli/tada.js dist/cli/tada && chmod +x dist/cli/tada && cp SKILL.md README.md package.json dist/skill/ && cp -r references dist/skill/ && node scripts/bake-readme-repo.mjs dev && node scripts/bake-skill-license.mjs",
+    "build:staging": "rm -rf dist && BUILD_ENV=staging tsup && mv dist/cli/tada.js dist/cli/tada && chmod +x dist/cli/tada && cp SKILL.md README.md package.json dist/skill/ && cp -r references dist/skill/ && node scripts/bake-readme-repo.mjs staging && node scripts/bake-skill-license.mjs",
+    "build:prod": "rm -rf dist && BUILD_ENV=prod tsup && mv dist/cli/tada.js dist/cli/tada && chmod +x dist/cli/tada && cp SKILL.md README.md package.json dist/skill/ && cp -r references dist/skill/ && node scripts/bake-readme-repo.mjs prod && node scripts/bake-skill-license.mjs",
+    "test": "pnpm build:dev && vitest run test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "license": "MIT"
+}
