@@ -1,6 +1,6 @@
 {
   "name": "ride-agent-skill",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "TADA Ride Skill - OpenClaw Skill + Node scripts",
   "type": "module",
   "bin": {

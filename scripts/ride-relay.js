@@ -291,8 +291,41 @@ function defaultRunForSessions(cli, args) {
 }
 var TRANSCRIPT_TAIL_BYTES = 1024 * 1024;
 var TRANSCRIPT_FLUSH_WAIT_MS = 5e3;
-var TRANSCRIPT_FLUSH_POLL_MS = 100;
+var SESSION_LIST_POLL_MS = 250;
 var transcriptWaitBuffer = new Int32Array(new SharedArrayBuffer(4));
+var defaultSessionResolveRetry = {
+  now: Date.now,
+  wait: (ms) => {
+    Atomics.wait(transcriptWaitBuffer, 0, 0, ms);
+  },
+  timeoutMs: TRANSCRIPT_FLUSH_WAIT_MS,
+  pollMs: SESSION_LIST_POLL_MS
+};
+function listOpenclawSessions(cli, agentId, activeMinutes, run) {
+  const base = ["--json", "--agent", agentId, "--active", String(activeMinutes)];
+  const argForms = [["sessions", ...base], ["sessions", "list", ...base]];
+  let parsed;
+  let lastErr;
+  for (const args of argForms) {
+    try {
+      parsed = JSON.parse(run(cli, args));
+      lastErr = void 0;
+      break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (lastErr) {
+    throw new Error(
+      `could not run/parse \`openclaw sessions [list] --json --agent ${agentId}\`: ${lastErr.message}`
+    );
+  }
+  return parsed;
+}
+function formatSessionResolveDiagnostics(diagnostics) {
+  const { attempts, elapsedMs, latestSessionCount, observedSessionIds, storePathObserved } = diagnostics;
+  return ` [attempts=${attempts} elapsedMs=${elapsedMs} latestSessionCount=${latestSessionCount} observedSessionIds=${observedSessionIds} storePathObserved=${storePathObserved}]`;
+}
 function defaultTranscriptHasRideId(storePath, sessionId, rideId) {
   if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) return false;
   const transcript = path3.join(path3.dirname(storePath), `${sessionId}.jsonl`);
@@ -330,53 +363,70 @@ function resolveOpenclawSession(input) {
   const sessionKey = input.sessionKey ?? (passed?.startsWith("agent:") ? passed : void 0);
   const run = input.run ?? defaultRunForSessions;
   const activeMinutes = input.activeMinutes ?? DEFAULT_ACTIVE_MINUTES;
-  const base = ["--json", "--agent", input.agentId, "--active", String(activeMinutes)];
-  const argForms = [["sessions", ...base], ["sessions", "list", ...base]];
-  let parsed;
-  let lastErr;
-  for (const args of argForms) {
+  const retry = input.retry ?? defaultSessionResolveRetry;
+  const transcriptHasRideId = input.transcriptHasRideId ?? defaultTranscriptHasRideId;
+  const startedAt = retry.now();
+  const deadline = startedAt + retry.timeoutMs;
+  let result = {};
+  let withId = [];
+  let transcriptMatches = [];
+  let attempts = 0;
+  let latestSessionCount = 0;
+  let storePathObserved = false;
+  let hasValidSnapshot = false;
+  let lastListError;
+  const observedSessionIds = /* @__PURE__ */ new Set();
+  do {
+    attempts += 1;
     try {
-      parsed = JSON.parse(run(input.cli, args));
-      lastErr = void 0;
-      break;
+      result = listOpenclawSessions(input.cli, input.agentId, activeMinutes, run);
+      hasValidSnapshot = true;
+      lastListError = void 0;
     } catch (e) {
-      lastErr = e;
+      lastListError = e;
+      const now2 = retry.now();
+      if (now2 >= deadline) break;
+      retry.wait(Math.min(retry.pollMs, deadline - now2));
+      continue;
     }
-  }
-  if (lastErr) {
-    throw new Error(
-      `OPENCLAW_RELAY_SESSION_UNRESOLVED: could not run/parse \`openclaw sessions [list] --json --agent ${input.agentId}\`: ${lastErr.message}`
+    const sessions = result.sessions;
+    withId = (Array.isArray(sessions) ? sessions : []).filter(
+      (s) => typeof s?.sessionId === "string" && s.sessionId.length > 0
     );
-  }
-  const result = parsed;
-  const sessions = result?.sessions;
-  const withId = (Array.isArray(sessions) ? sessions : []).filter(
-    (s) => typeof s?.sessionId === "string" && s.sessionId.length > 0
-  );
-  if (withId.length === 0) {
+    latestSessionCount = withId.length;
+    storePathObserved ||= typeof result.path === "string";
+    for (const session of withId) observedSessionIds.add(session.sessionId);
+    if (input.rideId && typeof result.path === "string") {
+      transcriptMatches = withId.filter((s) => transcriptHasRideId(result.path, s.sessionId, input.rideId));
+      if (transcriptMatches.length > 1) {
+        throw new Error(
+          `OPENCLAW_RELAY_SESSION_AMBIGUOUS: ride ${input.rideId} appears in ${transcriptMatches.length} active sessions for agent ${input.agentId}`
+        );
+      }
+      if (transcriptMatches.length === 1) break;
+    } else {
+      break;
+    }
+    const now = retry.now();
+    if (now >= deadline) break;
+    retry.wait(Math.min(retry.pollMs, deadline - now));
+  } while (true);
+  const diagnostics = formatSessionResolveDiagnostics({
+    attempts,
+    elapsedMs: Math.max(0, retry.now() - startedAt),
+    latestSessionCount,
+    observedSessionIds: observedSessionIds.size,
+    storePathObserved
+  });
+  if (!hasValidSnapshot) {
     throw new Error(
-      `OPENCLAW_RELAY_SESSION_UNRESOLVED: no active session with a sessionId for agent ${input.agentId} (looked back ${activeMinutes}m). Is the agent's chat session live?`
+      `OPENCLAW_RELAY_SESSION_UNRESOLVED: ${lastListError?.message ?? "no valid session-list snapshot"}${diagnostics}`
     );
   }
   const keyMatches = sessionKey ? withId.filter((s) => {
     if (typeof s.key !== "string") return false;
     return sessionKey.startsWith("agent:") ? s.key === sessionKey : s.key.endsWith(":" + sessionKey);
   }) : [];
-  const transcriptHasRideId = input.transcriptHasRideId ?? defaultTranscriptHasRideId;
-  let transcriptMatches = [];
-  if (input.rideId && typeof result.path === "string") {
-    const deadline = Date.now() + (input.transcriptHasRideId ? 0 : TRANSCRIPT_FLUSH_WAIT_MS);
-    do {
-      transcriptMatches = withId.filter((s) => transcriptHasRideId(result.path, s.sessionId, input.rideId));
-      if (transcriptMatches.length > 0 || Date.now() >= deadline) break;
-      Atomics.wait(transcriptWaitBuffer, 0, 0, TRANSCRIPT_FLUSH_POLL_MS);
-    } while (true);
-  }
-  if (transcriptMatches.length > 1) {
-    throw new Error(
-      `OPENCLAW_RELAY_SESSION_AMBIGUOUS: ride ${input.rideId} appears in ${transcriptMatches.length} active sessions for agent ${input.agentId}`
-    );
-  }
   if (transcriptMatches.length === 1) {
     const matched = transcriptMatches[0];
     if (keyMatches.length === 1 && keyMatches[0].sessionId !== matched.sessionId) {
@@ -388,17 +438,31 @@ function resolveOpenclawSession(input) {
       sessionId: matched.sessionId,
       key: matched.key,
       source: "transcript",
+      ...attempts > 1 ? {
+        diagnostics: {
+          attempts,
+          elapsedMs: Math.max(0, retry.now() - startedAt),
+          latestSessionCount,
+          observedSessionIds: observedSessionIds.size,
+          storePathObserved
+        }
+      } : {},
       ...sessionKey && (keyMatches.length !== 1 || keyMatches[0].sessionId !== matched.sessionId) ? { correctedSessionKeyFrom: sessionKey } : {}
     };
   }
+  if (withId.length === 0) {
+    throw new Error(
+      `OPENCLAW_RELAY_SESSION_UNRESOLVED: no active session with a sessionId for agent ${input.agentId} (looked back ${activeMinutes}m). Is the agent's chat session live?${diagnostics}`
+    );
+  }
   if (!sessionKey) {
     throw new Error(
-      `OPENCLAW_RELAY_SESSION_UNRESOLVED: ride ${input.rideId ?? "(missing)"} was not found in any active session transcript and no --session-key hint was provided`
+      `OPENCLAW_RELAY_SESSION_UNRESOLVED: ride ${input.rideId ?? "(missing)"} was not found in any active session transcript and no --session-key hint was provided${diagnostics}`
     );
   }
   if (keyMatches.length === 0) {
     throw new Error(
-      `OPENCLAW_RELAY_SESSION_UNRESOLVED: the provided session-key hint was not found for agent ${input.agentId}`
+      `OPENCLAW_RELAY_SESSION_UNRESOLVED: the provided session-key hint was not found for agent ${input.agentId}${diagnostics}`
     );
   }
   if (keyMatches.length > 1) {
@@ -981,6 +1045,12 @@ async function runRideRelay(rideId, deps) {
     });
     sessionId = resolved.sessionId;
     sessionKeyResolved = resolved.key;
+    if (resolved.source === "transcript" && resolved.diagnostics && resolved.diagnostics.attempts > 1) {
+      process.stderr.write(JSON.stringify({
+        note: "OPENCLAW_RELAY_SESSION_RESOLVED_AFTER_RETRY",
+        ...resolved.diagnostics
+      }) + "\n");
+    }
     if (resolved.correctedSessionKeyFrom) {
       process.stderr.write(JSON.stringify({
         note: "OPENCLAW_RELAY_SESSION_KEY_CORRECTED",

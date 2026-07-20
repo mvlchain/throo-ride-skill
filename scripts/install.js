@@ -166,8 +166,8 @@ async function runInstall(depsOverride) {
   const deps = depsOverride ?? defaultDeps();
   const mode = ensureBaked("TADA_AGENT_INSTALL_MODE", "npm");
   const branch = ensureBaked("TADA_AGENT_CLI_REPO_BRANCH", "main");
-  const expectedSha = ensureBaked("TADA_AGENT_EXPECTED_CLI_SHA", "cbcf830");
-  const minVersion = ensureBaked("TADA_AGENT_MIN_VERSION", "1.2.0");
+  const expectedSha = ensureBaked("TADA_AGENT_EXPECTED_CLI_SHA", "125cad9");
+  const minVersion = ensureBaked("TADA_AGENT_MIN_VERSION", "1.2.1");
   const cliDir = expandHome("~/.tada/cli");
   const binDir = expandHome(SYMLINK_DIR);
   const linkPath = path2.join(binDir, SYMLINK_TARGET);

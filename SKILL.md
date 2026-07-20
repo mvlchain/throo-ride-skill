@@ -268,7 +268,7 @@ For the full event schema, reconnect procedure, exit-code semantics, and related
 
 When the active mode is `tada` (TADA/Throo member), `payment_item_uuid` (in `ride-request`) and `card_uuid` (in `ride-search`) are **optional**. The CLI resolves the payment card automatically:
 
-- **0 cards / all expired** → error `NO_CARD`. Tell the user to add a card in the TADA/Throo app and try again.
+- **0 cards / all expired** → error `NO_CARD`. Tell the user to add a card in the TADA/Throo app and try again. Cards are looked up on the pickup's regional gateway, so if the user insists a card is already saved, re-check the coordinates you passed before asking them to add another one.
 - **1 non-expired card** → that card is auto-selected; no agent action needed.
 - **2+ non-expired cards, exactly one with `is_default`** → the default is auto-selected; no agent action needed.
 - **2+ non-expired cards, no single default** → the command returns:

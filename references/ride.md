@@ -289,13 +289,32 @@ tada ride-search <origin_lat> <origin_lng> <dest_lat> <dest_lng> [card_uuid]
 
 Each entry in the result's `routes[]` carries `distance_display` and `duration_display` already localized to the rider's region (US regions in miles, elsewhere in km). Present these strings verbatim — do **not** convert distance units yourself.
 
-Each product carries `product_name` — the rider-facing display name, already region-localized (e.g. `Save Throo` in NY). Present `product_name` to the user; do **not** surface the raw `car_type` / `product_type` enum values (`SEDAN`, `ANYTADA`).
+The result is `{ options[], routes[] }`. Each entry in `options[]` carries `product_name` — the rider-facing display name, already region-localized (e.g. `Save Throo` in NY). Present `product_name` to the user; do **not** surface the raw `car_type` / `product_type` enum values (`SEDAN`, `ANYTADA`) — the projection does not return them.
+
+| Field | Meaning |
+|---|---|
+| `product_id` | Pass as `product_id` in `ride-request` |
+| `product_name` | Rider-facing display name (already region-localized) |
+| `price` | **The total the rider is charged** before any coupon or promotion — fares, fees, tolls and taxes included. A numeric string (e.g. `"31.35"`); the currency is in `price_currency`, never embedded here. Show exactly one price per option; there is no separate base fare to display. |
+| `price_currency` | ISO currency code for `price` (e.g. `USD`) |
+| `na` | `true` when the option cannot be booked right now. This is the single availability signal — it already accounts for every reason booking would reject the option. |
+
+An option with `na: true` always has `price: null`, and an option with `na: false` always has a `price`. Offer only `na: false` options to the rider.
 
 **2. Request** — a single JSON argument. `locations` is `[origin, destination]`; `payment_item_uuid` (the card) and `product_id` are both optional:
 ```bash
 tada ride-request '{"locations":[{"latitude":<oLat>,"longitude":<oLng>,"name":"<origin name>","address":"<origin address>"},{"latitude":<dLat>,"longitude":<dLng>,"name":"<dest name>","address":"<dest address>"}],"product_id":<optional int>}'
 ```
 Required field: `locations`. On success the ride is created in `PENDING` and the card is charged — **immediately start `ride-relay.js`** (see the ride-relay section). Do **not** call `ride-pay-prepare`/`ride-pay-confirm`.
+
+> **Coordinates must be flattened out of the place response.** `place-search` / `place-detail` nest coordinates under `lat_lng`, and each location you send must carry them **top-level** as `latitude` / `longitude`:
+>
+> ```
+> place-detail  →  { "place_id": …, "name": …, "lat_lng": { "latitude": 40.762048, "longitude": -73.938523 } }
+> ride-request  →  { "place_id": …, "name": …, "latitude": 40.762048, "longitude": -73.938523 }
+> ```
+>
+> The command tolerates the nested `lat_lng` container and the short `lat` / `lng` spelling, but emit the canonical flat form — it is the only shape the gateway itself accepts. Never omit the coordinates and expect them to be inferred: a location whose coordinates cannot be read fails with `INVALID_COORDINATES` rather than being routed to a guessed region. A `place-list` row already uses `latitude` / `longitude` and needs no conversion.
 
 **3. Status / cancel** — the ride id is the `request_id` returned by `ride-request`:
 ```bash
@@ -333,6 +352,8 @@ When the active mode is `tada` (TADA/Throo member), `payment_item_uuid` in `ride
 | 2+ non-expired cards, exactly one with `is_default: true` | The default is auto-selected; ride proceeds without agent action |
 | 2+ non-expired cards, no single default | Returns `{ needs_card_selection: true, cards: [...], next_action: "ASK_USER_TO_PICK_CARD_THEN_RERUN_WITH_payment_item_uuid" }` — present the list, ask the user to pick, re-run with the chosen card's `id` |
 | Card lookup fails (gateway error or expired session) | `CARD_LOOKUP_FAILED` error |
+
+Cards are **scoped to the pickup's region**: the lookup runs against the regional gateway derived from the origin coordinates. Correct coordinates are therefore a precondition for finding the rider's cards — this is why a location with unreadable coordinates is rejected outright (`INVALID_COORDINATES`) instead of being routed to a default region. If a user insists a card exists in the app but you get `NO_CARD`, re-check the coordinates you passed before telling them to add another card.
 
 Card register, delete, and set-default operations are not exposed by the CLI — they live in the TADA/Throo rider app.
 
