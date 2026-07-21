@@ -1,5 +1,28 @@
 # TADA/Throo Ride Skill
 
+### What if over 52,000+ NYC drivers were instantly accessible by your AI agent? Introducing 🚕 Ambient Hailing  Your AI agent can now hail a real taxi.
+
+Not a simulation. Not a demo network. A real driver, in a real car, pulling up to your curb, booked and paid for by your agent while you finish your coffee.
+
+**Ambient Hailing** is an open-source skill that connects AI agents to two live ride-hailing fleets: **Throo in New York** and **TADA in Singapore**. Install it in Claude Code or OpenClaw, and your agent can search rides, compare fares, book, pay, chat with your driver, and tip, with your explicit approval at every step that matters.
+
+```
+You:    "Get me to JFK by 3pm."
+Normal Agent:  "Found 3 cars nearby. Fastest is 4 min away, $52, arrives JFK 2:40pm. Book it?"
+You:    "Yes."
+Normal Agent:  "Booked. Marcus, white Camry, plate T7X-2041. He's 4 minutes out."
+```
+
+That's the whole UX. No app. No map-dragging. No surge-price roulette at 7am.
+
+## Why this exists
+
+Apps are just channels. In the agent era, your assistant won't open apps, it will talk to mobility infrastructure directly. We think ride-hailing is the perfect stress test for real-world agent commerce: it's real-time, safety-sensitive, and involves actual money. So we built it, open-sourced it, and connected it to fleets we actually operate.
+
+This is what "agents doing things in the physical world" looks like when it's real.
+
+## Overview
+
 Book TADA/Throo rides through your AI agent — in Claude Code or OpenClaw (Telegram).
 
 All runtime state (wallet keys, encrypted passphrase, ride DB) lives in `~/.tada/state/{data,keys}/` — independent of the skill's install directory since Phase 1. Installation does not touch `~/.openclaw/openclaw.json` or `.claude/settings.json`.
