@@ -136,13 +136,15 @@ node ${SKILL_DIR}/scripts/install.js
 | | `wallet-setup-verify` | Check webapp auth status (after the user says they approved) |
 | | `wallet-sign` | Sign message (SIWE or typed data) |
 | | `wallet-send-tx` | Send transaction |
-| | `wallet-balance` | Check wallet ETH/USDC balance |
+| | `wallet-balance` | Check wallet ETH/USDC balance (plus `source_usdc` on the bridge source chain) |
 | **Deposit** | `deposit-status` | Check collateral status |
 | | `deposit-add` | Deposit token collateral (USDC uses gasless relay; blocks until confirmed, `--no-wait` to opt out) |
 | | `deposit-relay-status` | Poll a gasless relay deposit by `request_id` |
 | | `deposit-tokens` | List supported deposit tokens |
 | | `deposit-withdraw` | Withdraw collateral (returns MVL regardless of the token deposited) |
 | | `bridge-deposit-eth` | Bridge ETH L1→L2 via L1StandardBridge (`tada bridge-deposit-eth <wallet_address> <value_eth> [recipient]`) |
+| **Bridge** | `bridge-usdc` | Move Ethereum USDC → Base USDC via CCTP (`tada bridge-usdc <wallet_address> [amount] [--fast] [--wait]`). Amount is **decimal USDC** (`50`), unlike `deposit-add`. Omit the amount to resume. |
+| | `bridge-usdc-status` | Read bridge job state (pure local read, no network) |
 | **Member** | `whoami` | Report active account mode + identity |
 | | `login --no-wait` | Start TADA/Throo member device-flow login (returns `approval_url`) |
 | | `login-verify` | Complete login with the app's 4-digit code |
@@ -299,9 +301,23 @@ After resolving: copy `place_id`, `lat_lng.{latitude,longitude}`, `name`, and `a
 
 For the full command signatures, field reference, and resolve→ride flow, see `references/ride.md` → "Member place search".
 
+## USDC bridge: reporting rule
+
+`tada bridge-usdc` moves Ethereum USDC to Base USDC (crypto-mode rides settle in Base USDC only). A Standard transfer takes ~20 minutes and does **not** block, so most `bridge-usdc` calls return while the money is still in flight.
+
+> **Only `status: COMPLETED` means the bridge is done.** Any other status — `INITIATED`, `BURN_SUBMITTED`, `ATTESTED`, `MINT_SUBMITTED` — means it is still in progress. **Never tell the user their top-up succeeded.** `minted_amount` is present only when the job is complete; if you cannot see it, you do not have an arrival to report.
+
+A blocking call that times out is not an error — it exits 0 carrying the live status. Report that status as in-progress and continue with `tada bridge-usdc <wallet_address>` (no amount) to resume; every unfinished response names that command in `next_step`.
+
+**`FAILED` with `funds_mid_flight: true`** is the one terminal state where the USDC is on neither chain — burned on Ethereum, not yet minted on Base. That response carries a `recovery` text. **Surface that text to the user verbatim, do not paraphrase it.** The job exists only in this machine's local SQLite; no server can reconstruct it, so the user's `bridge-usdc-status` output is the sole recovery input support will ever have. Nothing is lost, but only that output can finish the transfer.
+
+Amounts are **decimal USDC** (`50`, `50.5`) — unlike `deposit-add`, which takes raw 6-decimal units (`50000000`). Every bridge response carries both `amount_usdc` and `amount_raw`; check them against what you meant to send. On `--fast` the amount is what the user **receives** — the burn is larger by the max fee.
+
+Full command surface, wait behaviour, and error codes → `references/wallet.md` → "USDC Bridge".
+
 ## Per-feature references
 
-- Wallet management, SIWE login, phone verification, balance check, collateral → `references/wallet.md`
+- Wallet management, SIWE login, phone verification, balance check, collateral, USDC bridge → `references/wallet.md`
 - Place search, saved places (local catalog + Step 0 lookup), ride booking/status/cancellation/payment, ride history → `references/ride.md`
 - Driver chat (messaging + image) → `references/chat.md`
 - Tip configuration and payment → `references/tip.md`
